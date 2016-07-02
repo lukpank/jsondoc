@@ -71,10 +71,13 @@ const footer = `
 `
 
 type JSONDoc struct {
-	pkgName  string
-	pkg      map[string]*ast.Package
-	t        *template.Template
-	tmplName string
+	pkgName     string
+	pkg         map[string]*ast.Package
+	t           *template.Template
+	tmplName    string
+	b           bytes.Buffer
+	rendered    map[string]struct{}
+	renderQueue []string
 }
 
 const table = `
@@ -96,7 +99,7 @@ const table = `
 `
 
 func NewJSONDoc(pkg, index string) (*JSONDoc, error) {
-	d := &JSONDoc{pkgName: pkg}
+	d := &JSONDoc{pkgName: pkg, rendered: make(map[string]struct{})}
 	fset := token.NewFileSet()
 	p, err := parser.ParseDir(fset, pkg, nil, parser.ParseComments)
 	if err != nil {
@@ -127,41 +130,51 @@ func (d *JSONDoc) WriteTo(w io.Writer) error {
 }
 
 func (d *JSONDoc) input(name string) (string, error) {
-	s, err := d.renderType(name)
-	if err != nil {
+	d.b.Reset()
+	fmt.Fprintf(&d.b, "<div>\n<h3>Input (%s)</h3>\n", html.EscapeString(name))
+	d.rendered[name] = struct{}{}
+	if err := d.renderTypes(name); err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("<div>\n<h3>Input (%s)</h3>\n%s\n</div>\n", html.EscapeString(name), s), nil
+	d.b.WriteString("</div>\n")
+	return d.b.String(), nil
 }
 
 func (d *JSONDoc) output(name string) (string, error) {
-	s, err := d.renderType(name)
-	if err != nil {
+	d.b.Reset()
+	fmt.Fprintf(&d.b, "<div>\n<h3>Output (%s)</h3>\n", html.EscapeString(name))
+	d.rendered[name] = struct{}{}
+	if err := d.renderTypes(name); err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("<div>\n<h3>Output (%s)</h3>\n%s\n</div>\n", html.EscapeString(name), s), nil
+	d.b.WriteString("</div>\n")
+	return d.b.String(), nil
 }
 
-func (d *JSONDoc) renderType(name string) (string, error) {
-	var o *ast.Object
-outer:
-	for _, pkg := range d.pkg {
-		for _, f := range pkg.Files {
-			o = f.Scope.Objects[name]
-			if o != nil {
-				break outer
-			}
+func (d *JSONDoc) renderTypes(name string) error {
+	if err := d.renderType(name); err != nil {
+		return err
+	}
+	for i := 0; i < len(d.renderQueue); i++ {
+		fmt.Fprintf(&d.b, "<h4>Type %s</h4>\n", html.EscapeString(d.renderQueue[i]))
+		if err := d.renderType(d.renderQueue[i]); err != nil {
+			return err
 		}
 	}
+	d.renderQueue = d.renderQueue[:0]
+	return nil
+}
+
+func (d *JSONDoc) renderType(name string) error {
+	o := d.findObject(name)
 	if o == nil {
-		return "", fmt.Errorf("Type %s not found", name)
+		return fmt.Errorf("Type %s not found", name)
 	}
 	t, ok := o.Decl.(*ast.TypeSpec)
 	if !ok {
-		return "", fmt.Errorf("Object named %s is not a type", name)
+		return fmt.Errorf("Object named %s is not a type", name)
 	}
 
-	var b bytes.Buffer
 	if t, ok := t.Type.(*ast.StructType); ok {
 		type field struct {
 			Name, Type, Description string
@@ -174,21 +187,47 @@ outer:
 					if err == NotExported {
 						continue
 					}
-					return "", err
+					return err
 				}
 				fields = append(fields, field{name, d.typeString(f.Type), strings.TrimSpace(f.Comment.Text())})
 			}
 		}
-		d.t.ExecuteTemplate(&b, "table", fields)
+		d.t.ExecuteTemplate(&d.b, "table", fields)
 	}
-	return b.String(), nil
+	return nil
+}
+
+func (d *JSONDoc) findObject(name string) *ast.Object {
+	for _, pkg := range d.pkg {
+		for _, f := range pkg.Files {
+			if o := f.Scope.Objects[name]; o != nil {
+				return o
+			}
+		}
+	}
+	return nil
 }
 
 func (d *JSONDoc) typeString(t ast.Expr) string {
-	if t, ok := t.(*ast.ArrayType); ok {
-		return fmt.Sprintf("array of %s", t.Elt)
+	switch t := t.(type) {
+	case *ast.ArrayType:
+		return fmt.Sprintf("array of %s", d.typeString(t.Elt))
+	case *ast.Ident:
+		d.renderLater(t.Name)
+		return t.Name
+	default:
+		return fmt.Sprint(t)
 	}
-	return fmt.Sprint(t)
+}
+
+func (d *JSONDoc) renderLater(name string) {
+	if _, present := d.rendered[name]; present {
+		return
+	}
+	if o := d.findObject(name); o != nil {
+		d.renderQueue = append(d.renderQueue, name)
+		d.rendered[name] = struct{}{}
+	}
 }
 
 var NotExported = errors.New("Not exported")
