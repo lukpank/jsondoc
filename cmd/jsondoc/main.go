@@ -178,27 +178,52 @@ func (d *JSONDoc) renderTypeByName(name string) error {
 	return d.renderType(t)
 }
 
+type field struct {
+	Name, Type, Description string
+}
+
 func (d *JSONDoc) renderType(typ *ast.TypeSpec) error {
 	if t, ok := typ.Type.(*ast.StructType); ok {
-		type field struct {
-			Name, Type, Description string
-		}
-		var fields []field
-		for _, f := range t.Fields.List {
-			for _, indent := range f.Names {
-				name, err := tagToName(indent.Name, f.Tag)
-				if err != nil {
-					if err == NotExported {
-						continue
-					}
-					return err
-				}
-				fields = append(fields, field{name, d.typeString(f.Type, name), strings.TrimSpace(f.Comment.Text())})
-			}
+		fields, err := d.appendFields(nil, t)
+		if err != nil {
+			return err
 		}
 		d.t.ExecuteTemplate(&d.b, "table", fields)
 	}
 	return nil
+}
+
+func (d *JSONDoc) appendFields(fields []field, t *ast.StructType) ([]field, error) {
+	for _, f := range t.Fields.List {
+		if len(f.Names) == 0 {
+			o := d.findObject(f.Type.(*ast.Ident).Name)
+			if o == nil {
+				continue
+			}
+			t, ok := o.Decl.(*ast.TypeSpec)
+			if !ok {
+				continue
+			}
+			if t, ok := t.Type.(*ast.StructType); ok {
+				var err error
+				fields, err = d.appendFields(fields, t)
+				if err != nil {
+					return nil, err
+				}
+			}
+		}
+		for _, indent := range f.Names {
+			name, err := tagToName(indent.Name, f.Tag)
+			if err != nil {
+				if err == NotExported {
+					continue
+				}
+				return nil, err
+			}
+			fields = append(fields, field{name, d.typeString(f.Type, name), strings.TrimSpace(f.Comment.Text())})
+		}
+	}
+	return fields, nil
 }
 
 func (d *JSONDoc) findObject(name string) *ast.Object {

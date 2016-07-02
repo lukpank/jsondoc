@@ -36,10 +36,16 @@ type itemGetOutput struct {
 	Error     string `json:"error,omitempty"` // only present if there was an error
 	Name      string `json:"name"`
 	Size      size   `json:"size"`
+	Info      info   `json:"info"` // type with anonymous field
 }
 
 type size struct {
 	Length float64 `json:"lenght"` // length of the object
 	Width  float64 `json:"width"`  // width of the object
 	Height float64 `json:"height"` // height of the object
+}
+
+type info struct {
+	size
+	Weight float64 `json:"weight"` // weight of the object
 }
