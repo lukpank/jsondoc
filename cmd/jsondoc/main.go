@@ -77,7 +77,7 @@ type JSONDoc struct {
 	tmplName    string
 	b           bytes.Buffer
 	rendered    map[string]struct{}
-	renderQueue []string
+	renderQueue []*ast.TypeSpec
 }
 
 const table = `
@@ -152,12 +152,13 @@ func (d *JSONDoc) output(name string) (string, error) {
 }
 
 func (d *JSONDoc) renderTypes(name string) error {
-	if err := d.renderType(name); err != nil {
+	if err := d.renderTypeByName(name); err != nil {
 		return err
 	}
 	for i := 0; i < len(d.renderQueue); i++ {
-		fmt.Fprintf(&d.b, "<h4>Type %s</h4>\n", html.EscapeString(d.renderQueue[i]))
-		if err := d.renderType(d.renderQueue[i]); err != nil {
+		t := d.renderQueue[i]
+		fmt.Fprintf(&d.b, "<h4>Type %s</h4>\n", html.EscapeString(t.Name.Name))
+		if err := d.renderType(t); err != nil {
 			return err
 		}
 	}
@@ -165,7 +166,7 @@ func (d *JSONDoc) renderTypes(name string) error {
 	return nil
 }
 
-func (d *JSONDoc) renderType(name string) error {
+func (d *JSONDoc) renderTypeByName(name string) error {
 	o := d.findObject(name)
 	if o == nil {
 		return fmt.Errorf("Type %s not found", name)
@@ -174,8 +175,11 @@ func (d *JSONDoc) renderType(name string) error {
 	if !ok {
 		return fmt.Errorf("Object named %s is not a type", name)
 	}
+	return d.renderType(t)
+}
 
-	if t, ok := t.Type.(*ast.StructType); ok {
+func (d *JSONDoc) renderType(typ *ast.TypeSpec) error {
+	if t, ok := typ.Type.(*ast.StructType); ok {
 		type field struct {
 			Name, Type, Description string
 		}
@@ -189,7 +193,7 @@ func (d *JSONDoc) renderType(name string) error {
 					}
 					return err
 				}
-				fields = append(fields, field{name, d.typeString(f.Type), strings.TrimSpace(f.Comment.Text())})
+				fields = append(fields, field{name, d.typeString(f.Type, name), strings.TrimSpace(f.Comment.Text())})
 			}
 		}
 		d.t.ExecuteTemplate(&d.b, "table", fields)
@@ -208,25 +212,40 @@ func (d *JSONDoc) findObject(name string) *ast.Object {
 	return nil
 }
 
-func (d *JSONDoc) typeString(t ast.Expr) string {
+func (d *JSONDoc) typeString(t ast.Expr, name string) string {
 	switch t := t.(type) {
 	case *ast.ArrayType:
-		return fmt.Sprintf("array of %s", d.typeString(t.Elt))
+		if !strings.HasSuffix(name, "-element") {
+			name = name + "-element"
+		}
+		return fmt.Sprintf("array of %s", d.typeString(t.Elt, name))
 	case *ast.Ident:
-		d.renderLater(t.Name)
+		d.renderLater(t.Name, nil)
 		return t.Name
+	case *ast.StructType:
+		if strings.HasSuffix(name, "-element") {
+			d.renderLater(name, t)
+			return name
+		}
+		d.renderLater("of "+name, t)
+		return fmt.Sprintf("type of %s", name)
 	default:
 		return fmt.Sprint(t)
 	}
 }
 
-func (d *JSONDoc) renderLater(name string) {
+func (d *JSONDoc) renderLater(name string, t ast.Expr) {
+	if t != nil {
+		d.renderQueue = append(d.renderQueue, &ast.TypeSpec{Name: &ast.Ident{Name: name}, Type: t})
+	}
 	if _, present := d.rendered[name]; present {
 		return
 	}
 	if o := d.findObject(name); o != nil {
-		d.renderQueue = append(d.renderQueue, name)
-		d.rendered[name] = struct{}{}
+		if t, ok := o.Decl.(*ast.TypeSpec); ok {
+			d.renderQueue = append(d.renderQueue, t)
+			d.rendered[name] = struct{}{}
+		}
 	}
 }
 

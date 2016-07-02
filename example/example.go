@@ -20,7 +20,12 @@ type itemGetInput struct {
 	B  []string `json:"b"`
 	C  struct {
 		D, E int
-		F    string `json:"f"`
+		F    []struct {
+			A, B int
+		} `json:"f"`
+		G [][]struct {
+			A, B, C int
+		} `json:"g"`
 	}
 	NotExported string `json:"-"`
 }
