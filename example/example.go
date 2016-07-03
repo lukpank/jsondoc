@@ -7,6 +7,7 @@ package example
 type helloInput struct {
 	Name string `json:"test"` // Name to be used in greetings
 	A, B int    // Some numeric parameter
+	Size size   `json:"size"`
 }
 
 type helloOutput struct {
@@ -37,6 +38,12 @@ type itemGetOutput struct {
 	Name      string `json:"name"`
 	Size      size   `json:"size"`
 	Info      info   `json:"info"` // type with anonymous field
+	C         struct {
+		A, B string
+	}
+	F []struct {
+		A, B, C int
+	} `json:"f"`
 }
 
 type size struct {

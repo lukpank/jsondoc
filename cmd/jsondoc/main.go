@@ -78,6 +78,7 @@ type JSONDoc struct {
 	b           bytes.Buffer
 	rendered    map[string]struct{}
 	renderQueue []*ast.TypeSpec
+	links       map[string]map[ast.Expr]int
 }
 
 const table = `
@@ -99,7 +100,7 @@ const table = `
 `
 
 func NewJSONDoc(pkg, index string) (*JSONDoc, error) {
-	d := &JSONDoc{pkgName: pkg, rendered: make(map[string]struct{})}
+	d := &JSONDoc{pkgName: pkg, rendered: make(map[string]struct{}), links: make(map[string]map[ast.Expr]int)}
 	fset := token.NewFileSet()
 	p, err := parser.ParseDir(fset, pkg, nil, parser.ParseComments)
 	if err != nil {
@@ -157,7 +158,12 @@ func (d *JSONDoc) renderTypes(name string) error {
 	}
 	for i := 0; i < len(d.renderQueue); i++ {
 		t := d.renderQueue[i]
-		fmt.Fprintf(&d.b, "<h4>Type %s</h4>\n", html.EscapeString(t.Name.Name))
+		s := "type-" + strings.Replace(t.Name.Name, " ", "-", -1)
+		i := d.links[s][t.Type]
+		if i > 0 {
+			s = fmt.Sprintf("%s-%d", s, i)
+		}
+		fmt.Fprintf(&d.b, "<h4 id=\"%s\">Type %s</h4>\n", html.EscapeString(s), html.EscapeString(t.Name.Name))
 		if err := d.renderType(t); err != nil {
 			return err
 		}
@@ -220,7 +226,8 @@ func (d *JSONDoc) appendFields(fields []field, t *ast.StructType) ([]field, erro
 				}
 				return nil, err
 			}
-			fields = append(fields, field{name, d.typeString(f.Type, name), strings.TrimSpace(f.Comment.Text())})
+			fields = append(fields, field{html.EscapeString(name), d.typeLink(f.Type, name),
+				html.EscapeString(strings.TrimSpace(f.Comment.Text()))})
 		}
 	}
 	return fields, nil
@@ -237,41 +244,52 @@ func (d *JSONDoc) findObject(name string) *ast.Object {
 	return nil
 }
 
-func (d *JSONDoc) typeString(t ast.Expr, name string) string {
+func (d *JSONDoc) typeLink(t ast.Expr, name string) string {
 	switch t := t.(type) {
 	case *ast.ArrayType:
 		if !strings.HasSuffix(name, "-element") {
 			name = name + "-element"
 		}
-		return fmt.Sprintf("array of %s", d.typeString(t.Elt, name))
+		return fmt.Sprintf("array of %s", d.typeLink(t.Elt, name))
 	case *ast.Ident:
-		d.renderLater(t.Name, nil)
-		return t.Name
+		if ID := d.renderLater(t.Name, nil); ID != "" {
+			return fmt.Sprintf(`<a href="#%s">%s</a>`, html.EscapeString(ID), html.EscapeString(t.Name))
+		}
+		return html.EscapeString(t.Name)
 	case *ast.StructType:
 		if strings.HasSuffix(name, "-element") {
-			d.renderLater(name, t)
-			return name
+			ID := d.renderLater(name, t)
+			return fmt.Sprintf(`<a href="#%s">%s</a>`, html.EscapeString(ID), html.EscapeString(name))
 		}
-		d.renderLater("of "+name, t)
-		return fmt.Sprintf("type of %s", name)
+		ID := d.renderLater("of "+name, t)
+		return fmt.Sprintf(`<a href="#%s">type of %s</a>`, html.EscapeString(ID), html.EscapeString(name))
 	default:
-		return fmt.Sprint(t)
+		return html.EscapeString(fmt.Sprint(t))
 	}
 }
 
-func (d *JSONDoc) renderLater(name string, t ast.Expr) {
+func (d *JSONDoc) renderLater(name string, t ast.Expr) string {
 	if t != nil {
 		d.renderQueue = append(d.renderQueue, &ast.TypeSpec{Name: &ast.Ident{Name: name}, Type: t})
+		s := "type-" + strings.Replace(name, " ", "-", -1)
+		if d.links[s] == nil {
+			d.links[s] = make(map[ast.Expr]int)
+		}
+		i := len(d.links[s]) + 1
+		d.links[s][t] = i
+		return fmt.Sprintf("%s-%d", s, i)
 	}
 	if _, present := d.rendered[name]; present {
-		return
+		return "type-" + name
 	}
 	if o := d.findObject(name); o != nil {
 		if t, ok := o.Decl.(*ast.TypeSpec); ok {
 			d.renderQueue = append(d.renderQueue, t)
 			d.rendered[name] = struct{}{}
+			return "type-" + name
 		}
 	}
+	return ""
 }
 
 var NotExported = errors.New("Not exported")
