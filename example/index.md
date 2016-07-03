@@ -1,3 +1,5 @@
+{{title "Example JSON API description"}}
+
 # Example JSON API description
 
 ## Request for path `/hello`

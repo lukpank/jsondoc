@@ -21,7 +21,7 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/golang-commonmark/markdown"
+	"github.com/russross/blackfriday"
 )
 
 func main() {
@@ -30,20 +30,44 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	os.Stdout.WriteString(header)
-	err = d.WriteTo(os.Stdout)
-	if err != nil {
+	if err := d.WriteTo(os.Stdout); err != nil {
 		log.Fatal(err)
 	}
-	os.Stdout.WriteString(footer)
 }
 
 const header = `
+<!DOCTYPE html>
 <html>
 <head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>{{.}}</title>
 <style>
-body {
-    margin: 1em;
+@media print {
+    body {
+        margin: 1em;
+    }
+    nav {
+        display: none;
+    }
+}
+@media screen {
+    body {
+        margin: 1em 1em 1em 320px;
+    }
+    nav {
+        position: absolute;
+        left: 0px;
+        top: 0px;
+        width: 300px;
+        height: 100%;
+        float: left;
+        border-right: solid 1px #e0e0e0;
+        font-size: 80%;
+    }
+    nav ul {
+        list-style-type:none;
+        padding-left: 1em;
+    }
 }
 h1, h2, h3, h4 {
     font-family: sans-serif;
@@ -65,6 +89,8 @@ th {
 <body>
 `
 
+var headerTmpl = template.Must(template.New("header").Parse(header))
+
 const footer = `
 </body>
 </html>
@@ -79,6 +105,7 @@ type JSONDoc struct {
 	rendered    map[string]struct{}
 	renderQueue []*ast.TypeSpec
 	links       map[string]map[ast.Expr]int
+	title       string
 }
 
 const table = `
@@ -107,7 +134,7 @@ func NewJSONDoc(pkg, index string) (*JSONDoc, error) {
 		return nil, err
 	}
 	d.pkg = p
-	d.t = template.New("table").Funcs(template.FuncMap{"input": d.input, "output": d.output})
+	d.t = template.New("table").Funcs(template.FuncMap{"input": d.input, "output": d.output, "title": d.setTitle})
 	if _, err := d.t.Parse(table); err != nil {
 		return nil, err
 	}
@@ -118,21 +145,43 @@ func NewJSONDoc(pkg, index string) (*JSONDoc, error) {
 	return d, nil
 }
 
+const htmlFlags = blackfriday.HTML_TOC
+
+const commonExtensions = 0 |
+	blackfriday.EXTENSION_NO_INTRA_EMPHASIS |
+	blackfriday.EXTENSION_TABLES |
+	blackfriday.EXTENSION_FENCED_CODE |
+	blackfriday.EXTENSION_AUTOLINK |
+	blackfriday.EXTENSION_STRIKETHROUGH |
+	blackfriday.EXTENSION_SPACE_HEADERS |
+	blackfriday.EXTENSION_HEADER_IDS |
+	blackfriday.EXTENSION_BACKSLASH_LINE_BREAK |
+	blackfriday.EXTENSION_DEFINITION_LISTS
+
 func (d *JSONDoc) WriteTo(w io.Writer) error {
 	var b bytes.Buffer
 	if err := d.t.ExecuteTemplate(&b, d.tmplName, nil); err != nil {
 		return err
 	}
-	md := markdown.New(markdown.HTML(true))
-	if err := md.Render(w, b.Bytes()); err != nil {
-		return err
+	out := blackfriday.Markdown(b.Bytes(), blackfriday.HtmlRenderer(htmlFlags, "", ""), commonExtensions)
+	err := headerTmpl.Execute(w, html.EscapeString(d.title))
+	if err == nil {
+		_, err = w.Write(out)
 	}
-	return nil
+	if err == nil {
+		_, err = io.WriteString(w, footer)
+	}
+	return err
+}
+
+func (d *JSONDoc) setTitle(title string) string {
+	d.title = title
+	return ""
 }
 
 func (d *JSONDoc) input(name string) (string, error) {
 	d.b.Reset()
-	fmt.Fprintf(&d.b, "<div>\n<h3>Input (%s)</h3>\n", html.EscapeString(name))
+	fmt.Fprintf(&d.b, "### Input (%s)\n<div>\n", markdownEscapeString(name))
 	d.rendered[name] = struct{}{}
 	if err := d.renderTypes(name); err != nil {
 		return "", err
@@ -143,7 +192,7 @@ func (d *JSONDoc) input(name string) (string, error) {
 
 func (d *JSONDoc) output(name string) (string, error) {
 	d.b.Reset()
-	fmt.Fprintf(&d.b, "<div>\n<h3>Output (%s)</h3>\n", html.EscapeString(name))
+	fmt.Fprintf(&d.b, "### Output (%s)\n<div>\n", markdownEscapeString(name))
 	d.rendered[name] = struct{}{}
 	if err := d.renderTypes(name); err != nil {
 		return "", err
@@ -320,4 +369,23 @@ func tagToName(name string, tag *ast.BasicLit) (string, error) {
 		return strconv.Quote(fields[0]) + suffix, nil
 	}
 	return strconv.Quote(name), nil
+}
+
+var isASCIIPunctuation [128]bool
+
+func init() {
+	for _, c := range "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~." {
+		isASCIIPunctuation[c] = true
+	}
+}
+
+func markdownEscapeString(s string) string {
+	var b bytes.Buffer
+	for _, c := range s {
+		if c < 128 && isASCIIPunctuation[c] {
+			b.WriteByte('\\')
+		}
+		b.WriteRune(c)
+	}
+	return b.String()
 }
