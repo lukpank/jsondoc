@@ -49,6 +49,9 @@ const header = `
     nav {
         display: none;
     }
+    table, td, th {
+        border: solid 1px #000000;
+    }
 }
 @media screen {
     body {
@@ -72,21 +75,42 @@ const header = `
         list-style-type:none;
         padding-left: 1em;
     }
+    h1, h2, h3 {
+        padding-left: 3px;
+    }
+    h4 {
+        padding-left: 2em;
+    }
+    h2, h3 {
+        margin-top: 2em;
+        padding-bottom: 3px;
+        border-bottom: solid 3px #c5cae9;
+    }
+    p, table {
+        margin-left: 2em;
+    }
+    table, td, th {
+        border: solid 1px #c5cae9;
+    }
+    a {
+        color: #5c6bc0;
+    }
+    a:visited {
+        color: #ab47bc;
+    }
 }
 h1, h2, h3, h4 {
     font-family: sans-serif;
 }
 table {
-    border: solid 1px #808080;
     border-collapse: collapse;
     page-break-inside: avoid;
 }
 td, th {
-    border: solid 1px #808080;
     padding: 0.7em;
 }
 th {
-    background-color: #e0e0e0;
+    background-color: #e8eaf6;
 }
 </style>
 </head>
