@@ -52,7 +52,11 @@ const header = `
 }
 @media screen {
     body {
-        margin: 1em 1em 1em 320px;
+        margin: 0 1em 0 300px;
+        border-left: solid 1px #e0e0e0;
+        padding-left: 1em;
+        padding-top: 1px;
+        padding-bottom: 1em;
     }
     nav {
         position: absolute;
@@ -61,8 +65,8 @@ const header = `
         width: 300px;
         height: 100%;
         float: left;
-        border-right: solid 1px #e0e0e0;
         font-size: 80%;
+        padding-top: 1em;
     }
     nav ul {
         list-style-type:none;
