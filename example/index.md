@@ -17,3 +17,7 @@ Used to obtain information about the given product.
 {{input "itemGetInput"}}
 
 {{output "itemGetOutput"}}
+
+## Request with no fields
+
+{{input "empty"}}

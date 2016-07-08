@@ -271,7 +271,12 @@ func (d *JSONDoc) renderType(typ *ast.TypeSpec) error {
 		if err != nil {
 			return err
 		}
-		d.t.ExecuteTemplate(&d.b, "table", fields)
+		if len(fields) > 0 {
+			d.t.ExecuteTemplate(&d.b, "table", fields)
+		} else {
+			d.b.WriteString("<p>JSON object with no fields.</p>\n")
+		}
+
 	}
 	return nil
 }

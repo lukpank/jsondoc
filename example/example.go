@@ -56,3 +56,5 @@ type info struct {
 	size
 	Weight float64 `json:"weight"` // weight of the object
 }
+
+type empty struct{}
