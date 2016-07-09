@@ -58,3 +58,22 @@ type info struct {
 }
 
 type empty struct{}
+type emptyA []struct{}
+type emptyAA [][]struct{}
+type emptyO map[string]struct{}
+type emptyOO map[string]map[string]struct{}
+type emptyAO []map[string]struct{}
+type emptyOA map[string][]struct{}
+
+type mapInput map[string]map[string][]int
+
+type mapOutput map[string]struct {
+	I    int
+	OI   map[string]struct{ I int }
+	OOAI map[string]map[string][]struct{ I int }
+}
+
+type arrayInput [][]struct {
+	AS  []string
+	AAI [][]int
+}

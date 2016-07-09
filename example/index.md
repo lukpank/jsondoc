@@ -21,3 +21,19 @@ Used to obtain information about the given product.
 ## Request with no fields
 
 {{input "empty"}}
+{{input "emptyA"}}
+{{input "emptyAA"}}
+{{input "emptyO"}}
+{{input "emptyOO"}}
+{{input "emptyAO"}}
+{{input "emptyOA"}}
+
+## Request with maps
+
+{{input "mapInput"}}
+
+{{output "mapOutput"}}
+
+## Request with arrays
+
+{{input "arrayInput"}}

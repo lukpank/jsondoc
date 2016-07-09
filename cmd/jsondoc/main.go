@@ -137,14 +137,14 @@ type JSONDoc struct {
 }
 
 const table = `
-<p>JSON object with the following fields:</p>
+<p>JSON {{.Prefix}}object{{.S}} with the following fields:</p>
 <table>
 <tr>
 <th>Key name</th>
 <th>Value type</th>
 <th>Description</th>
 </tr>
-{{range .}}
+{{range .Fields}}
 <tr>
 <td>{{.Name}}</td>
 <td>{{.Type}}</td>
@@ -266,17 +266,47 @@ type field struct {
 }
 
 func (d *JSONDoc) renderType(typ *ast.TypeSpec) error {
-	if t, ok := typ.Type.(*ast.StructType); ok {
+	return d.renderType1(typ.Type, "")
+}
+
+func (d *JSONDoc) renderType1(typ ast.Expr, prefix string) error {
+	switch t := typ.(type) {
+	case *ast.StructType:
 		fields, err := d.appendFields(nil, t)
 		if err != nil {
 			return err
 		}
-		if len(fields) > 0 {
-			d.t.ExecuteTemplate(&d.b, "table", fields)
-		} else {
-			d.b.WriteString("<p>JSON object with no fields.</p>\n")
+		s := ""
+		if prefix != "" {
+			s = "s"
 		}
-
+		if len(fields) > 0 {
+			type data struct {
+				Prefix, S string
+				Fields    []field
+			}
+			d.t.ExecuteTemplate(&d.b, "table", data{prefix, s, fields})
+		} else {
+			fmt.Fprintf(&d.b, "<p>JSON %sobject%s with no fields.</p>\n", prefix, s)
+		}
+	case *ast.MapType:
+		if ident, ok := t.Key.(*ast.Ident); ok && ident.Name == "string" {
+			if prefix == "" {
+				prefix = "object of "
+			} else {
+				prefix = prefix + " objects of "
+			}
+			return d.renderType1(t.Value, prefix)
+		} else {
+			return errors.New("only maps with string keys are supported")
+		}
+	case *ast.ArrayType:
+		if prefix == "" {
+			prefix = "array of "
+		} else {
+			prefix = prefix + " arrays of "
+		}
+		return d.renderType1(t.Elt, prefix)
 	}
 	return nil
 }
@@ -308,7 +338,7 @@ func (d *JSONDoc) appendFields(fields []field, t *ast.StructType) ([]field, erro
 				}
 				return nil, err
 			}
-			fields = append(fields, field{html.EscapeString(name), d.typeLink(f.Type, name),
+			fields = append(fields, field{html.EscapeString(name), d.typeLink(f.Type, name, ""),
 				html.EscapeString(strings.TrimSpace(f.Comment.Text()))})
 		}
 	}
@@ -326,13 +356,22 @@ func (d *JSONDoc) findObject(name string) *ast.Object {
 	return nil
 }
 
-func (d *JSONDoc) typeLink(t ast.Expr, name string) string {
+func (d *JSONDoc) typeLink(t ast.Expr, name string, suffix string) string {
 	switch t := t.(type) {
 	case *ast.ArrayType:
 		if !strings.HasSuffix(name, "-element") {
 			name = name + "-element"
 		}
-		return fmt.Sprintf("array of %s", d.typeLink(t.Elt, name))
+		return fmt.Sprintf("array%s of %s", suffix, d.typeLink(t.Elt, name, "s"))
+	case *ast.MapType:
+		if ident, ok := t.Key.(*ast.Ident); ok && ident.Name == "string" {
+			if !strings.HasSuffix(name, "-element") {
+				name = name + "-element"
+			}
+			return fmt.Sprintf("object%s of %s", suffix, d.typeLink(t.Value, name, "s"))
+		} else {
+			return "(error: only maps with string keys are supported)"
+		}
 	case *ast.Ident:
 		if ID := d.renderLater(t.Name, nil); ID != "" {
 			return fmt.Sprintf(`<a href="#%s">%s</a>`, html.EscapeString(ID), html.EscapeString(t.Name))
