@@ -30,7 +30,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	if err := d.WriteTo(os.Stdout); err != nil {
+	if _, err := d.WriteTo(os.Stdout); err != nil {
 		log.Fatal(err)
 	}
 }
@@ -186,20 +186,25 @@ const commonExtensions = 0 |
 	blackfriday.EXTENSION_BACKSLASH_LINE_BREAK |
 	blackfriday.EXTENSION_DEFINITION_LISTS
 
-func (d *JSONDoc) WriteTo(w io.Writer) error {
+func (d *JSONDoc) WriteTo(w io.Writer) (int64, error) {
 	var b bytes.Buffer
 	if err := d.t.ExecuteTemplate(&b, d.tmplName, nil); err != nil {
-		return err
+		return 0, err
 	}
 	out := blackfriday.Markdown(b.Bytes(), blackfriday.HtmlRenderer(htmlFlags, "", ""), commonExtensions)
-	err := headerTmpl.Execute(w, html.EscapeString(d.title))
+	b.Reset()
+	err := headerTmpl.Execute(&b, html.EscapeString(d.title))
+	var n, m, o int
 	if err == nil {
-		_, err = w.Write(out)
+		n, err = w.Write(b.Bytes())
 	}
 	if err == nil {
-		_, err = io.WriteString(w, footer)
+		m, err = w.Write(out)
 	}
-	return err
+	if err == nil {
+		o, err = io.WriteString(w, footer)
+	}
+	return int64(n) + int64(m) + int64(o), err
 }
 
 func (d *JSONDoc) setTitle(title string) string {
