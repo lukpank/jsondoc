@@ -1,8 +1,13 @@
-// Copyright 2016 Łukasz Pankowski <lukpank at o2 dot pl>. All rights
+// Copyright 2016-2017 Łukasz Pankowski <lukpank at o2 dot pl>. All rights
 // reserved.  This source code is licensed under the terms of the MIT
 // license. See LICENSE file for details.
 
 package example
+
+import (
+	"github.com/lukpank/jsondoc/example/another"
+	another1 "github.com/lukpank/jsondoc/example/another"
+)
 
 type helloInput struct {
 	Name string `json:"test"` // Name to be used in greetings
@@ -76,4 +81,10 @@ type mapOutput map[string]struct {
 type arrayInput [][]struct {
 	AS  []string
 	AAI [][]int
+}
+
+type withAnother struct {
+	A   another.Another
+	A1  another1.Another
+	A11 another1.Another
 }

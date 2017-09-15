@@ -37,3 +37,9 @@ Used to obtain information about the given product.
 ## Request with arrays
 
 {{input "arrayInput"}}
+
+## Request with data from another package
+
+{{input "withAnother"}}
+
+{{output "github.com/lukpank/jsondoc/example/another.Another"}}
