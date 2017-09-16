@@ -2,6 +2,13 @@
 // reserved.  This source code is licensed under the terms of the MIT
 // license. See LICENSE file for details.
 
+// jsondoc is a command line tool used to simplify creation of
+// documentation of HTTP (REST) JSON APIs for projects written in
+// Go. The input and/or output JSON structure for particular endpoints
+// is obtained from named types from selected Go packages. The output
+// of jsondoc is an HTML file with embedded CSS.
+//
+// See https://github.com/lukpank/jsondoc for futher documentation.
 package main
 
 import (
