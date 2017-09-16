@@ -7,6 +7,7 @@ package main
 import (
 	"bytes"
 	"errors"
+	"flag"
 	"fmt"
 	"go/ast"
 	"go/build"
@@ -26,12 +27,24 @@ import (
 )
 
 func main() {
+	output := flag.String("o", "", "output file name")
+	flag.Parse()
 	log.SetFlags(0)
-	d, err := NewJSONDoc("../../example/index.md")
+	if flag.NArg() == 0 {
+		log.Fatal("error: missing argument: a markdown template for the documentation")
+	}
+	d, err := NewJSONDoc(flag.Arg(0))
 	if err != nil {
 		log.Fatal(err)
 	}
-	if _, err := d.WriteTo(os.Stdout); err != nil {
+	out := os.Stdout
+	if *output != "" {
+		out, err = os.Create(*output)
+		if err != nil {
+			log.Fatal("error: could not open output file: ", err)
+		}
+	}
+	if _, err := d.WriteTo(out); err != nil {
 		log.Fatal(err)
 	}
 }
