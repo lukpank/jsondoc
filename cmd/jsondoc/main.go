@@ -27,7 +27,7 @@ import (
 
 func main() {
 	log.SetFlags(0)
-	d, err := NewJSONDoc("../../example", "../../example/index.md")
+	d, err := NewJSONDoc("../../example/index.md")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -99,6 +99,9 @@ const header = `
     a:visited {
         color: #ab47bc;
     }
+    :target {
+        color : #1abc9c;
+    }
 }
 h1, h2, h3, h4 {
     font-family: sans-serif;
@@ -126,22 +129,27 @@ const footer = `
 `
 
 type JSONDoc struct {
-	pkgName      string
-	pkg          map[string]*ast.Package
-	packages     map[string]map[string]*ast.Package
-	packageNames map[string]string
+	imports      map[string]string       // map: local in template name -> package path
+	packages     map[string]*ast.Package // map: package path -> package AST
+	packageNames map[string]string       // map: package path -> package name (may be obtained without parsing the package)
 	t            *template.Template
 	tmplName     string
 	b            bytes.Buffer
-	rendered     map[string]struct{}
+	rendered     map[renderedElem]string
 	renderQueue  []queueElem
 	links        map[string]map[ast.Expr]int
 	title        string
 }
 
 type queueElem struct {
-	t *ast.TypeSpec
-	f *ast.File
+	t  *ast.TypeSpec
+	c  *context
+	id string
+}
+
+type renderedElem struct {
+	Name string
+	Obj  *ast.Object
 }
 
 const table = `
@@ -162,16 +170,10 @@ const table = `
 </table>
 `
 
-func NewJSONDoc(pkg, index string) (*JSONDoc, error) {
-	d := &JSONDoc{pkgName: pkg, rendered: make(map[string]struct{}), links: make(map[string]map[ast.Expr]int),
-		packages: make(map[string]map[string]*ast.Package), packageNames: make(map[string]string)}
-	fset := token.NewFileSet()
-	p, err := parser.ParseDir(fset, pkg, nil, parser.ParseComments)
-	if err != nil {
-		return nil, err
-	}
-	d.pkg = p
-	d.t = template.New("table").Funcs(template.FuncMap{"input": d.input, "output": d.output, "title": d.setTitle})
+func NewJSONDoc(index string) (*JSONDoc, error) {
+	d := &JSONDoc{rendered: make(map[renderedElem]string), links: make(map[string]map[ast.Expr]int),
+		packages: make(map[string]*ast.Package), packageNames: make(map[string]string), imports: make(map[string]string)}
+	d.t = template.New("table").Funcs(template.FuncMap{"input": d.input, "output": d.output, "title": d.setTitle, "import": d.importPkg})
 	if _, err := d.t.Parse(table); err != nil {
 		return nil, err
 	}
@@ -221,10 +223,20 @@ func (d *JSONDoc) setTitle(title string) string {
 	return ""
 }
 
+func (d *JSONDoc) importPkg(name, path string) (string, error) {
+	if d.imports[name] != "" {
+		return "", fmt.Errorf("name %s already imported", name)
+	}
+	if _, err := d.parsedPackage(path); err != nil {
+		return "", err
+	}
+	d.imports[name] = path
+	return "", nil
+}
+
 func (d *JSONDoc) input(name string) (string, error) {
 	d.b.Reset()
 	fmt.Fprintf(&d.b, "### Input (%s)\n<div>\n", markdownEscapeString(name))
-	d.rendered[name] = struct{}{}
 	if err := d.renderTypes(name); err != nil {
 		return "", err
 	}
@@ -239,7 +251,6 @@ func (d *JSONDoc) output(name string) (string, error) {
 		ident = name[i+1:]
 	}
 	fmt.Fprintf(&d.b, "### Output (%s)\n<div>\n", markdownEscapeString(ident))
-	d.rendered[name] = struct{}{}
 	if err := d.renderTypes(name); err != nil {
 		return "", err
 	}
@@ -253,13 +264,8 @@ func (d *JSONDoc) renderTypes(name string) error {
 	}
 	for i := 0; i < len(d.renderQueue); i++ {
 		q := d.renderQueue[i]
-		s := "type-" + strings.Replace(q.t.Name.Name, " ", "-", -1)
-		i := d.links[s][q.t.Type]
-		if i > 0 {
-			s = fmt.Sprintf("%s-%d", s, i)
-		}
-		fmt.Fprintf(&d.b, "<h4 id=\"%s\">Type %s</h4>\n", html.EscapeString(s), html.EscapeString(q.t.Name.Name))
-		if err := d.renderType(q.t, q.f); err != nil {
+		fmt.Fprintf(&d.b, "<h4 id=\"%s\">Type %s</h4>\n", html.EscapeString(q.id), html.EscapeString(q.t.Name.Name))
+		if err := d.renderType(q.t, q.c); err != nil {
 			return err
 		}
 	}
@@ -268,7 +274,17 @@ func (d *JSONDoc) renderTypes(name string) error {
 }
 
 func (d *JSONDoc) renderTypeByName(name string) error {
-	o, f, err := d.findObject(name)
+	pkgName := "."
+	i := strings.LastIndexByte(name, '.')
+	if i != -1 {
+		pkgName = name[:i]
+		name = name[i+1:]
+	}
+	path := d.imports[pkgName]
+	if path == "" {
+		return fmt.Errorf("name %s mast be imported to access %s", pkgName, name)
+	}
+	o, c, err := d.findObject(name, d.packages[path], path)
 	if o == nil {
 		return fmt.Errorf("Type %s error: %v", name, err)
 	}
@@ -276,21 +292,21 @@ func (d *JSONDoc) renderTypeByName(name string) error {
 	if !ok {
 		return fmt.Errorf("Object named %s is not a type", name)
 	}
-	return d.renderType(t, f)
+	return d.renderType(t, c)
 }
 
 type field struct {
 	Name, Type, Description string
 }
 
-func (d *JSONDoc) renderType(typ *ast.TypeSpec, f *ast.File) error {
-	return d.renderType1(typ.Type, f, "")
+func (d *JSONDoc) renderType(typ *ast.TypeSpec, c *context) error {
+	return d.renderType1(typ.Type, c, "")
 }
 
-func (d *JSONDoc) renderType1(typ ast.Expr, f *ast.File, prefix string) error {
+func (d *JSONDoc) renderType1(typ ast.Expr, c *context, prefix string) error {
 	switch t := typ.(type) {
 	case *ast.StructType:
-		fields, err := d.appendFields(nil, t, f)
+		fields, err := d.appendFields(nil, t, c)
 		if err != nil {
 			return err
 		}
@@ -314,7 +330,7 @@ func (d *JSONDoc) renderType1(typ ast.Expr, f *ast.File, prefix string) error {
 			} else {
 				prefix = prefix + " objects of "
 			}
-			return d.renderType1(t.Value, f, prefix)
+			return d.renderType1(t.Value, c, prefix)
 		} else {
 			return errors.New("only maps with string keys are supported")
 		}
@@ -324,15 +340,15 @@ func (d *JSONDoc) renderType1(typ ast.Expr, f *ast.File, prefix string) error {
 		} else {
 			prefix = prefix + " arrays of "
 		}
-		return d.renderType1(t.Elt, f, prefix)
+		return d.renderType1(t.Elt, c, prefix)
 	}
 	return nil
 }
 
-func (d *JSONDoc) appendFields(fields []field, t *ast.StructType, file *ast.File) ([]field, error) {
+func (d *JSONDoc) appendFields(fields []field, t *ast.StructType, c *context) ([]field, error) {
 	for _, f := range t.Fields.List {
 		if len(f.Names) == 0 {
-			o, file, err := d.findObject(f.Type.(*ast.Ident).Name)
+			o, c, err := d.findObject(f.Type.(*ast.Ident).Name, c.Package, c.Path)
 			if err != nil {
 				return nil, err
 			}
@@ -345,7 +361,7 @@ func (d *JSONDoc) appendFields(fields []field, t *ast.StructType, file *ast.File
 			}
 			if t, ok := t.Type.(*ast.StructType); ok {
 				var err error
-				fields, err = d.appendFields(fields, t, file)
+				fields, err = d.appendFields(fields, t, c)
 				if err != nil {
 					return nil, err
 				}
@@ -359,26 +375,32 @@ func (d *JSONDoc) appendFields(fields []field, t *ast.StructType, file *ast.File
 				}
 				return nil, err
 			}
-			fields = append(fields, field{html.EscapeString(name), d.typeLink(f.Type, file, name, ""),
+			fields = append(fields, field{html.EscapeString(name), d.typeLink(f.Type, c, name, ""),
 				html.EscapeString(strings.TrimSpace(f.Comment.Text()))})
 		}
 	}
 	return fields, nil
 }
 
-func (d *JSONDoc) findObject(name string) (*ast.Object, *ast.File, error) {
-	i := strings.LastIndexByte(name, '.')
-	if i != -1 {
-		pkg, err := d.parsedPackage(name[:i])
-		if err != nil {
-			return nil, nil, err
-		}
-		return findObject(pkg, name[i+1:], name[:i])
-	}
-	return findObject(d.pkg, name, d.pkgName)
+type context struct {
+	Path    string
+	Package *ast.Package
+	File    *ast.File
 }
 
-func (d *JSONDoc) parsedPackage(path string) (map[string]*ast.Package, error) {
+func (d *JSONDoc) findObject(name string, pkg *ast.Package, path string) (*ast.Object, *context, error) {
+	for _, f := range pkg.Files {
+		if o := f.Scope.Objects[name]; o != nil {
+			return o, &context{path, pkg, f}, nil
+		}
+	}
+	if builtin[name] {
+		return nil, nil, nil
+	}
+	return nil, nil, fmt.Errorf("identifier %s not found in package %s", name, path)
+}
+
+func (d *JSONDoc) parsedPackage(path string) (*ast.Package, error) {
 	if pkg := d.packages[path]; pkg != nil {
 		return pkg, nil
 	}
@@ -387,27 +409,20 @@ func (d *JSONDoc) parsedPackage(path string) (map[string]*ast.Package, error) {
 		return nil, err
 	}
 	fset := token.NewFileSet()
-	pkg, err := parser.ParseDir(fset, filepath.Join(p.SrcRoot, path), nil, parser.ParseComments)
-	if err != nil {
-		return nil, err
+	pkg, err := parser.ParseDir(fset, filepath.Join(p.SrcRoot, path), notTest, parser.ParseComments)
+	if len(pkg) > 1 {
+		return nil, fmt.Errorf("more than one package in directory %s", path)
 	}
-	d.packages[path] = pkg
-	d.packageNames[path] = p.Name
-	return pkg, nil
+	for _, p := range pkg {
+		d.packages[path] = p
+		d.packageNames[path] = p.Name
+		return p, nil
+	}
+	return nil, fmt.Errorf("package %s is empty", path)
 }
 
-func findObject(pkg map[string]*ast.Package, name, pkgName string) (*ast.Object, *ast.File, error) {
-	for _, pkg := range pkg {
-		for _, f := range pkg.Files {
-			if o := f.Scope.Objects[name]; o != nil {
-				return o, f, nil
-			}
-		}
-	}
-	if builtin[name] {
-		return nil, nil, nil
-	}
-	return nil, nil, fmt.Errorf("identifier %s not found in package %s", name, pkgName)
+func notTest(info os.FileInfo) bool {
+	return !strings.HasSuffix(info.Name(), "_test.go")
 }
 
 var builtin = map[string]bool{
@@ -433,33 +448,33 @@ var builtin = map[string]bool{
 	"uintptr":    true,
 }
 
-func (d *JSONDoc) typeLink(t ast.Expr, file *ast.File, name string, suffix string) string {
+func (d *JSONDoc) typeLink(t ast.Expr, c *context, name string, suffix string) string {
 	switch t := t.(type) {
 	case *ast.ArrayType:
 		if !strings.HasSuffix(name, "-element") {
 			name = name + "-element"
 		}
-		return fmt.Sprintf("array%s of %s", suffix, d.typeLink(t.Elt, file, name, "s"))
+		return fmt.Sprintf("array%s of %s", suffix, d.typeLink(t.Elt, c, name, "s"))
 	case *ast.MapType:
 		if ident, ok := t.Key.(*ast.Ident); ok && ident.Name == "string" {
 			if !strings.HasSuffix(name, "-element") {
 				name = name + "-element"
 			}
-			return fmt.Sprintf("object%s of %s", suffix, d.typeLink(t.Value, file, name, "s"))
+			return fmt.Sprintf("object%s of %s", suffix, d.typeLink(t.Value, c, name, "s"))
 		} else {
 			return "(error: only maps with string keys are supported)"
 		}
 	case *ast.Ident:
-		if ID := d.renderLater(t.Name, nil, file); ID != "" {
+		if ID := d.renderLater(t.Name, nil, c); ID != "" {
 			return fmt.Sprintf(`<a href="#%s">%s</a>`, html.EscapeString(ID), html.EscapeString(t.Name))
 		}
 		return html.EscapeString(t.Name)
 	case *ast.StructType:
 		if strings.HasSuffix(name, "-element") {
-			ID := d.renderLater(name, t, file)
+			ID := d.renderLater(name, t, c)
 			return fmt.Sprintf(`<a href="#%s">%s</a>`, html.EscapeString(ID), html.EscapeString(name))
 		}
-		ID := d.renderLater("of "+name, t, file)
+		ID := d.renderLater("of "+name, t, c)
 		return fmt.Sprintf(`<a href="#%s">type of %s</a>`, html.EscapeString(ID), html.EscapeString(name))
 	case *ast.SelectorExpr:
 		ident, ok := t.X.(*ast.Ident)
@@ -467,17 +482,22 @@ func (d *JSONDoc) typeLink(t ast.Expr, file *ast.File, name string, suffix strin
 			fmt.Fprintf(os.Stderr, "type %v: expected identifier before '.'\n", t)
 			return html.EscapeString(fmt.Sprint(t))
 		}
-		path, err := d.findImportIdent(file, ident.Name)
+		path, err := d.findImportIdent(c.File, ident.Name)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "type %s.%s: %v\n", ident.Name, t.Sel.Name, err)
 			return html.EscapeString(fmt.Sprintf("%s.%s", ident.Name, t.Sel.Name))
 		}
-		_, file, err := d.findObject(path + "." + t.Sel.Name)
+		pkg, err := d.parsedPackage(path)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "type %s.%s: %v\n", ident.Name, t.Sel.Name, err)
 			return html.EscapeString(fmt.Sprintf("%s.%s", ident.Name, t.Sel.Name))
 		}
-		if ID := d.renderLater(path+"."+t.Sel.Name, nil, file); ID != "" {
+		_, c, err := d.findObject(t.Sel.Name, pkg, path)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "type %s.%s: %v\n", ident.Name, t.Sel.Name, err)
+			return html.EscapeString(fmt.Sprintf("%s.%s", ident.Name, t.Sel.Name))
+		}
+		if ID := d.renderLater(t.Sel.Name, nil, c); ID != "" {
 			return fmt.Sprintf(`<a href="#%s">%s</a>`, html.EscapeString(ID), html.EscapeString(t.Sel.Name))
 		}
 		return html.EscapeString(fmt.Sprintf("%s.%s", ident.Name, t.Sel.Name))
@@ -511,31 +531,40 @@ func (d *JSONDoc) findImportIdent(file *ast.File, name string) (string, error) {
 	return "", fmt.Errorf(`package named %s not found (may need to run "go build -i")`, name)
 }
 
-func (d *JSONDoc) renderLater(name string, t ast.Expr, file *ast.File) string {
+func (d *JSONDoc) renderLater(name string, t ast.Expr, c *context) string {
 	if t != nil {
-		d.renderQueue = append(d.renderQueue, queueElem{&ast.TypeSpec{Name: &ast.Ident{Name: name}, Type: t}, file})
 		s := "type-" + strings.Replace(name, " ", "-", -1)
 		if d.links[s] == nil {
 			d.links[s] = make(map[ast.Expr]int)
 		}
 		i := len(d.links[s]) + 1
 		d.links[s][t] = i
-		return fmt.Sprintf("%s-%d", s, i)
+		s = fmt.Sprintf("%s-%d", s, i)
+		d.renderQueue = append(d.renderQueue, queueElem{&ast.TypeSpec{Name: &ast.Ident{Name: name}, Type: t}, c, s})
+		return s
 	}
-	if _, present := d.rendered[name]; present {
-		return "type-" + name
-	}
-	o, file, err := d.findObject(name)
+	o, c, err := d.findObject(name, c.Package, c.Path)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return ""
 	}
-	if o != nil {
-		if t, ok := o.Decl.(*ast.TypeSpec); ok {
-			d.renderQueue = append(d.renderQueue, queueElem{t, file})
-			d.rendered[name] = struct{}{}
-			return "type-" + name
+	if o == nil {
+		return ""
+	}
+	if s := d.rendered[renderedElem{name, o}]; s != "" {
+		return s
+	}
+	if t, ok := o.Decl.(*ast.TypeSpec); ok {
+		s := "type-" + name
+		if d.links[s] == nil {
+			d.links[s] = make(map[ast.Expr]int)
 		}
+		i := len(d.links[s]) + 1
+		d.links[s][t.Type] = i
+		s = fmt.Sprintf("%s-%d", s, i)
+		d.renderQueue = append(d.renderQueue, queueElem{t, c, s})
+		d.rendered[renderedElem{name, o}] = s
+		return s
 	}
 	return ""
 }

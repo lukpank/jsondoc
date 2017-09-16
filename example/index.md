@@ -1,5 +1,8 @@
 {{title "Example JSON API description"}}
 
+{{import "." "github.com/lukpank/jsondoc/example"}}
+{{import "another" "github.com/lukpank/jsondoc/example/another"}}
+
 # Example JSON API description
 
 ## Request for path `/hello`
@@ -42,4 +45,4 @@ Used to obtain information about the given product.
 
 {{input "withAnother"}}
 
-{{output "github.com/lukpank/jsondoc/example/another.Another"}}
+{{output "another.Another"}}
