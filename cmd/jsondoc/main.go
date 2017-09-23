@@ -234,16 +234,16 @@ func (d *JSONDoc) renderType1(typ ast.Expr, c *context, prefix string) error {
 			fmt.Fprintf(&d.b, "<p>JSON %sobject%s with no fields.</p>\n", prefix, s)
 		}
 	case *ast.MapType:
-		if ident, ok := t.Key.(*ast.Ident); ok && ident.Name == "string" {
-			if prefix == "" {
-				prefix = "object of "
-			} else {
-				prefix = prefix + " objects of "
-			}
-			return d.renderType1(t.Value, c, prefix)
-		} else {
+		ident, ok := t.Key.(*ast.Ident)
+		if !ok || ident.Name != "string" {
 			return errors.New("only maps with string keys are supported")
 		}
+		if prefix == "" {
+			prefix = "object of "
+		} else {
+			prefix = prefix + " objects of "
+		}
+		return d.renderType1(t.Value, c, prefix)
 	case *ast.ArrayType:
 		if prefix == "" {
 			prefix = "array of "
@@ -369,14 +369,14 @@ func (d *JSONDoc) typeLink(t ast.Expr, c *context, name string, suffix string) s
 		}
 		return fmt.Sprintf("array%s of %s", suffix, d.typeLink(t.Elt, c, name, "s"))
 	case *ast.MapType:
-		if ident, ok := t.Key.(*ast.Ident); ok && ident.Name == "string" {
-			if !strings.HasSuffix(name, "-element") {
-				name = name + "-element"
-			}
-			return fmt.Sprintf("object%s of %s", suffix, d.typeLink(t.Value, c, name, "s"))
-		} else {
+		ident, ok := t.Key.(*ast.Ident)
+		if !ok || ident.Name != "string" {
 			return "(error: only maps with string keys are supported)"
 		}
+		if !strings.HasSuffix(name, "-element") {
+			name = name + "-element"
+		}
+		return fmt.Sprintf("object%s of %s", suffix, d.typeLink(t.Value, c, name, "s"))
 	case *ast.Ident:
 		if ID := d.renderLater(t.Name, nil, c); ID != "" {
 			return fmt.Sprintf(`<a href="#%s">%s</a>`, html.EscapeString(ID), html.EscapeString(t.Name))
