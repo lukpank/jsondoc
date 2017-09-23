@@ -430,6 +430,9 @@ func (d *JSONDoc) parsedPackage(path string) (*ast.Package, error) {
 	}
 	fset := token.NewFileSet()
 	pkg, err := parser.ParseDir(fset, filepath.Join(p.SrcRoot, path), notTest, parser.ParseComments)
+	if err != nil {
+		return nil, err
+	}
 	if len(pkg) > 1 {
 		return nil, fmt.Errorf("more than one package in directory %s", path)
 	}
