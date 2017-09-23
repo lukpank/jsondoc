@@ -62,6 +62,7 @@ type JSONDoc struct {
 	packageNames map[string]string       // map: package path -> package name (may be obtained without parsing the package)
 	t            *template.Template
 	tmplName     string
+	table        *template.Template
 	b            bytes.Buffer
 	rendered     map[renderedElem]string
 	renderQueue  []queueElem
@@ -80,17 +81,18 @@ type renderedElem struct {
 	Obj  *ast.Object
 }
 
-func NewJSONDoc(index string) (*JSONDoc, error) {
+func NewJSONDoc(filename string) (*JSONDoc, error) {
 	d := &JSONDoc{rendered: make(map[renderedElem]string), links: make(map[string]map[ast.Expr]int),
 		packages: make(map[string]*ast.Package), packageNames: make(map[string]string), imports: make(map[string]string)}
-	d.t = template.New("table").Funcs(template.FuncMap{"input": d.input, "output": d.output, "title": d.setTitle, "import": d.importPkg})
-	if _, err := d.t.Parse(table); err != nil {
+	d.t = template.New("").Funcs(template.FuncMap{"input": d.input, "output": d.output, "title": d.setTitle, "import": d.importPkg})
+	if _, err := d.t.ParseFiles(filename); err != nil {
 		return nil, err
 	}
-	if _, err := d.t.ParseFiles(index); err != nil {
+	d.table = template.New("table")
+	if _, err := d.table.Parse(table); err != nil {
 		return nil, err
 	}
-	d.tmplName = filepath.Base(index)
+	d.tmplName = filepath.Base(filename)
 	return d, nil
 }
 
@@ -229,7 +231,7 @@ func (d *JSONDoc) renderType1(typ ast.Expr, c *context, prefix string) error {
 				Prefix, S string
 				Fields    []field
 			}
-			d.t.ExecuteTemplate(&d.b, "table", data{prefix, s, fields})
+			d.table.ExecuteTemplate(&d.b, "table", data{prefix, s, fields})
 		} else {
 			fmt.Fprintf(&d.b, "<p>JSON %sobject%s with no fields.</p>\n", prefix, s)
 		}
