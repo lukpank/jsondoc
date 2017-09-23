@@ -56,98 +56,6 @@ func main() {
 	}
 }
 
-const header = `
-<!DOCTYPE html>
-<html>
-<head>
-<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
-<title>{{.}}</title>
-<style>
-@media print {
-    body {
-        margin: 1em;
-    }
-    nav {
-        display: none;
-    }
-    table, td, th {
-        border: solid 1px #000000;
-    }
-}
-@media screen {
-    body {
-        margin: 0 1em 0 300px;
-        border-left: solid 1px #e0e0e0;
-        padding-left: 1em;
-        padding-top: 1px;
-        padding-bottom: 1em;
-    }
-    nav {
-        position: absolute;
-        left: 0px;
-        top: 0px;
-        width: 300px;
-        height: 100%;
-        float: left;
-        font-size: 80%;
-        padding-top: 1em;
-    }
-    nav ul {
-        list-style-type:none;
-        padding-left: 1em;
-    }
-    h1, h2, h3 {
-        padding-left: 3px;
-    }
-    h4 {
-        padding-left: 2em;
-    }
-    h2, h3 {
-        margin-top: 2em;
-        padding-bottom: 3px;
-        border-bottom: solid 3px #c5cae9;
-    }
-    p, table {
-        margin-left: 2em;
-    }
-    table, td, th {
-        border: solid 1px #c5cae9;
-    }
-    a {
-        color: #5c6bc0;
-    }
-    a:visited {
-        color: #ab47bc;
-    }
-    :target {
-        color : #1abc9c;
-    }
-}
-h1, h2, h3, h4 {
-    font-family: sans-serif;
-}
-table {
-    border-collapse: collapse;
-    page-break-inside: avoid;
-}
-td, th {
-    padding: 0.7em;
-}
-th {
-    background-color: #e8eaf6;
-}
-</style>
-</head>
-<body>
-`
-
-var headerTmpl = template.Must(template.New("header").Parse(header))
-
-const footer = `
-</body>
-</html>
-`
-
 type JSONDoc struct {
 	imports      map[string]string       // map: local in template name -> package path
 	packages     map[string]*ast.Package // map: package path -> package AST
@@ -171,24 +79,6 @@ type renderedElem struct {
 	Name string
 	Obj  *ast.Object
 }
-
-const table = `
-<p>JSON {{.Prefix}}object{{.S}} with the following fields:</p>
-<table>
-<tr>
-<th>Key name</th>
-<th>Value type</th>
-<th>Description</th>
-</tr>
-{{range .Fields}}
-<tr>
-<td>{{.Name}}</td>
-<td>{{.Type}}</td>
-<td>{{.Description}}</td>
-</tr>
-{{end}}
-</table>
-`
 
 func NewJSONDoc(index string) (*JSONDoc, error) {
 	d := &JSONDoc{rendered: make(map[renderedElem]string), links: make(map[string]map[ast.Expr]int),
@@ -224,7 +114,7 @@ func (d *JSONDoc) WriteTo(w io.Writer) (int64, error) {
 	}
 	out := blackfriday.Markdown(b.Bytes(), blackfriday.HtmlRenderer(htmlFlags, "", ""), commonExtensions)
 	b.Reset()
-	err := headerTmpl.Execute(&b, html.EscapeString(d.title))
+	err := htmlHeaderTmpl.Execute(&b, html.EscapeString(d.title))
 	var n, m, o int
 	if err == nil {
 		n, err = w.Write(b.Bytes())
@@ -233,7 +123,7 @@ func (d *JSONDoc) WriteTo(w io.Writer) (int64, error) {
 		m, err = w.Write(out)
 	}
 	if err == nil {
-		o, err = io.WriteString(w, footer)
+		o, err = io.WriteString(w, htmlFooter)
 	}
 	return int64(n) + int64(m) + int64(o), err
 }
