@@ -8,7 +8,7 @@
 // is obtained from named types from selected Go packages. The output
 // of jsondoc is an HTML file with embedded CSS.
 //
-// See https://github.com/lukpank/jsondoc for futher documentation.
+// See https://github.com/lukpank/jsondoc for further documentation.
 package main
 
 import (

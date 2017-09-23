@@ -52,7 +52,7 @@ type itemGetOutput struct {
 }
 
 type size struct {
-	Length float64 `json:"lenght"` // length of the object
+	Length float64 `json:"length"` // length of the object
 	Width  float64 `json:"width"`  // width of the object
 	Height float64 `json:"height"` // height of the object
 }
